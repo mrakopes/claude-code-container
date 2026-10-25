@@ -4,6 +4,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl git jq less openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
+RUN curl -fsSL https://packages.buildkite.com/helm-linux/helm-debian/gpgkey \
+      -o /usr/share/keyrings/helm.asc \
+    && echo "deb [signed-by=/usr/share/keyrings/helm.asc] https://packages.buildkite.com/helm-linux/helm-debian/any/ any main" \
+      > /etc/apt/sources.list.d/helm.list \
+    && apt-get update && apt-get install -y --no-install-recommends helm \
+    && rm -rf /var/lib/apt/lists/*
+
 ARG CLAUDE_VERSION=latest
 RUN curl -fsSL https://claude.ai/install.sh | bash -s ${CLAUDE_VERSION} \
     && cp -L /root/.local/bin/claude /usr/local/bin/claude \
