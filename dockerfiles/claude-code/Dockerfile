@@ -4,6 +4,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl git jq less openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
+ARG CLAUDE_VERSION=latest
+RUN curl -fsSL https://claude.ai/install.sh | bash -s ${CLAUDE_VERSION} \
+    && cp -L /root/.local/bin/claude /usr/local/bin/claude \
+    && rm -rf /root/.local
+
 RUN curl -fsSL https://packages.buildkite.com/helm-linux/helm-debian/gpgkey \
       -o /usr/share/keyrings/helm.asc \
     && echo "deb [signed-by=/usr/share/keyrings/helm.asc] https://packages.buildkite.com/helm-linux/helm-debian/any/ any main" \
@@ -11,10 +16,12 @@ RUN curl -fsSL https://packages.buildkite.com/helm-linux/helm-debian/gpgkey \
     && apt-get update && apt-get install -y --no-install-recommends helm \
     && rm -rf /var/lib/apt/lists/*
 
-ARG CLAUDE_VERSION=latest
-RUN curl -fsSL https://claude.ai/install.sh | bash -s ${CLAUDE_VERSION} \
-    && cp -L /root/.local/bin/claude /usr/local/bin/claude \
-    && rm -rf /root/.local
+RUN curl -fsSL https://apt.releases.hashicorp.com/gpg \
+      -o /usr/share/keyrings/hashicorp.asc \
+    && echo "deb [signed-by=/usr/share/keyrings/hashicorp.asc] https://apt.releases.hashicorp.com trixie main" \
+      > /etc/apt/sources.list.d/hashicorp.list \
+    && apt-get update && apt-get install -y --no-install-recommends terraform \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -s /bin/bash agent
 USER agent
