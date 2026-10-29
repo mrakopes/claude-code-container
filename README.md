@@ -38,6 +38,7 @@ Symlink them into `~/bin` (or anywhere on `$PATH`):
 ```
 ln -s "$PWD"/bin/ccd ~/bin/ccd
 ln -s "$PWD"/bin/ccdw ~/bin/ccdw
+ln -s "$PWD"/bin/ccd-update ~/bin/ccd-update
 ```
 
 Env vars:
@@ -47,6 +48,18 @@ Env vars:
 - `CCD_CPUS` - cpu limit (default `4`)
 
 Arguments are passed to `claude`, e.g. `ccd --resume` or `ccd -p "..." | less` (a TTY is only allocated when attached to a terminal).
+
+## git config
+
+Each profile can have its own git config in `~/.config/ccd/<profile>.gitconfig`. If the file exists, `ccd` mounts `~/.config/ccd` read-only and points `GIT_CONFIG_GLOBAL` at it, so the agent can't change its identity or config. Shared settings go to `common.gitconfig`, included from the profile files.
+
+```
+mkdir -p ~/.config/ccd
+cp examples/gitconfig/*.gitconfig ~/.config/ccd/
+# then edit [user] in ~/.config/ccd/<profile>.gitconfig
+```
+
+No credentials or ssh keys are mounted - push from the host.
 
 ## claude code updates
 

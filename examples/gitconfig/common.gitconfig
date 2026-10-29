@@ -1,0 +1,9 @@
+# shared by all agent profiles, included from <profile>.gitconfig
+[init]
+	defaultBranch = main
+[commit]
+	gpgsign = false
+[tag]
+	gpgsign = false
+[pull]
+	ff = only

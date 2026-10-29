@@ -5,6 +5,14 @@ profile="${CCD_PROFILE:-claude-agent}"
 cfg="$HOME/.local/share/$profile"
 mkdir -p "$cfg"
 
+# per-profile git config, mounted read-only (see examples/gitconfig)
+gitcfg_dir="$HOME/.config/ccd"
+gitcfg=()
+[ -f "$gitcfg_dir/$profile.gitconfig" ] && gitcfg=(
+    -v "$gitcfg_dir":/home/agent/.config/ccd:ro
+    -e GIT_CONFIG_GLOBAL="/home/agent/.config/ccd/$profile.gitconfig"
+)
+
 tty=(-i); [ -t 0 ] && [ -t 1 ] && tty=(-it)
 name="$profile-$(basename "$PWD" | tr -c 'a-zA-Z0-9_.\n-' '_')-$$"
 
@@ -19,6 +27,7 @@ exec podman run --rm "${tty[@]}" \
     -v "$PWD":"$PWD" -w "$PWD" \
     -v "$cfg":/home/agent/.claude \
     -e CLAUDE_CONFIG_DIR=/home/agent/.claude \
+    "${gitcfg[@]}" \
     --name "$name" \
     localhost/claude-agent:latest claude "$@"
 
