@@ -61,6 +61,29 @@ cp examples/gitconfig/*.gitconfig ~/.config/ccd/
 
 No credentials or ssh keys are mounted - push from the host.
 
+## worktrees
+
+`ccd -w [name]` (or `--worktree[=name]`) runs claude's native worktree mode: the agent works in `.claude/worktrees/<name>` on branch `worktree-<name>`, created from your local `HEAD` (`worktree.baseRef: head`), and Claude Code offers to clean it up on exit. Gitignored files listed in `.worktreeinclude` (`.gitignore` syntax) are copied into new worktrees.
+
+Mounts in worktree mode:
+
+| path | mount |
+|---|---|
+| `<repo>` | read-only - your files; agent can still read untracked ones (`.env`, data) |
+| `<repo>/.git` | read-write - commits, branches, worktree metadata |
+| `<repo>/.git/config`, `<repo>/.git/hooks` | read-only - both run code on the host |
+| `<repo>/.claude/worktrees` | read-write - the agent's worktrees |
+
+The agent also gets `--add-dir <repo>` and a short system prompt note about the read-only checkout. Without `-w`, `.git/config` and `.git/hooks` are still read-only when `ccd` runs in the repo root.
+
+Notes:
+
+- add `.claude/worktrees/` to your global gitignore (`~/.config/git/ignore`) so it doesn't show up as untracked
+- the agent can still create and move refs (needed to commit), including your branches
+- permission approvals aren't saved in worktree mode (the checkout's `.claude/settings.local.json` is read-only)
+- review and merge on the host: `git log main..worktree-<name>`, `git merge worktree-<name>`, `git worktree remove .claude/worktrees/<name>`
+- deleting a branch inside the container prints `warning: update of config-file failed` - harmless, `.git/config` is read-only
+
 ## claude code updates
 
 The claude code version is pinned in `dockerfiles/claude-code/Dockerfile` (`ARG CLAUDE_VERSION`). It sits at the top, so a bump rebuilds every layer, including an `apt-get upgrade`.
@@ -68,5 +91,10 @@ The claude code version is pinned in `dockerfiles/claude-code/Dockerfile` (`ARG 
 `ccd-update` checks for a new release (one small request to the release endpoint, compared with the pinned version and the built image's `claude-code.version` label). Exits 0 if up to date, 1 if an update is available.
 `ccd-update -u` bumps the pinned version and rebuilds `localhost/claude-agent:latest`.
 
+---
+
 @TODO - restricted network/egress
+```
+# podman ..
 #    --network agent-net -e HTTPS_PROXY=http://egress-proxy:3128 \
+```

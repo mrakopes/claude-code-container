@@ -13,6 +13,46 @@ gitcfg=()
     -e GIT_CONFIG_GLOBAL="/home/agent/.config/ccd/$profile.gitconfig"
 )
 
+# main checkout of the git repo $PWD is in (also from a subdir or a linked worktree)
+gitdir=$(git -C "$PWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+repo=""
+[ "$(basename "$gitdir")" = .git ] && repo=$(dirname "$gitdir")
+
+worktree=0
+for a in "$@"; do
+    case "$a" in -w|--worktree|--worktree=*) worktree=1 ;; esac
+done
+
+mounts=(-v "$PWD":"$PWD")
+claude_args=()
+if [ -n "$repo" ]; then
+    # .git/config and hooks run code on the host -> read-only
+    mkdir -p "$gitdir/hooks"
+    gitro=(
+        -v "$gitdir/config":"$gitdir/config":ro
+        -v "$gitdir/hooks":"$gitdir/hooks":ro
+    )
+    if [ "$worktree" = 1 ]; then
+        # claude --worktree: checkout read-only, agent works in .claude/worktrees/<name>
+        case "$PWD/" in "$repo"/*) ;; *) echo "ccd: -w needs to be run inside $repo" >&2; exit 1 ;; esac
+        wt="$repo/.claude/worktrees"
+        mkdir -p "$wt"
+        mounts=(
+            -v "$repo":"$repo":ro
+            -v "$gitdir":"$gitdir"
+            "${gitro[@]}"
+            -v "$wt":"$wt"
+        )
+        claude_args=(
+            --add-dir "$repo"
+            --settings '{"worktree":{"baseRef":"head"}}'
+            --append-system-prompt "You work in a git worktree under $wt; make all edits and commits there. $repo is the user's checkout, mounted read-only: use it only to read or copy files that are not in git (e.g. .env, data). Paths the user gives under $repo mean the same file in your worktree."
+        )
+    elif [ "$repo" = "$PWD" ]; then
+        mounts+=("${gitro[@]}")
+    fi
+fi
+
 tty=(-i); [ -t 0 ] && [ -t 1 ] && tty=(-it)
 name="$profile-$(basename "$PWD" | tr -c 'a-zA-Z0-9_.\n-' '_')-$$"
 
@@ -24,12 +64,12 @@ exec podman run --rm "${tty[@]}" \
     --pids-limit=2048 \
     --tmpfs /tmp:rw,size=2g,mode=1777 \
     --ulimit nofile=8192:8192 \
-    -v "$PWD":"$PWD" -w "$PWD" \
+    "${mounts[@]}" -w "$PWD" \
     -v "$cfg":/home/agent/.claude \
     -e CLAUDE_CONFIG_DIR=/home/agent/.claude \
     "${gitcfg[@]}" \
     --name "$name" \
-    localhost/claude-agent:latest claude "$@"
+    localhost/claude-agent:latest claude "${claude_args[@]}" "$@"
 
 # @TODO - restricted network/egress
 #    --network agent-net -e HTTPS_PROXY=http://egress-proxy:3128 \
