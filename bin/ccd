@@ -1,6 +1,14 @@
 #!/bin/bash
+set -euo pipefail
 
-podman run --rm -it \
+profile="${CCD_PROFILE:-claude-agent}"
+cfg="$HOME/.local/share/$profile"
+mkdir -p "$cfg"
+
+tty=(-i); [ -t 0 ] && [ -t 1 ] && tty=(-it)
+name="$profile-$(basename "$PWD" | tr -c 'a-zA-Z0-9_.\n-' '_')-$$"
+
+exec podman run --rm "${tty[@]}" \
     --userns=keep-id --cap-drop=ALL --security-opt no-new-privileges \
     --cgroup-parent=agents.slice \
     --memory="${CCD_MEM:-8g}" --memory-swap="${CCD_MEM:-8g}" \
@@ -9,11 +17,10 @@ podman run --rm -it \
     --tmpfs /tmp:rw,size=2g,mode=1777 \
     --ulimit nofile=8192:8192 \
     -v "$PWD":"$PWD" -w "$PWD" \
-    -v ~/.local/share/claude-agent:/home/agent/.claude \
+    -v "$cfg":/home/agent/.claude \
     -e CLAUDE_CONFIG_DIR=/home/agent/.claude \
-    --name "claude-$(basename "$PWD")" \
+    --name "$name" \
     localhost/claude-agent:latest claude "$@"
-
 
 # @TODO - restricted network/egress
 #    --network agent-net -e HTTPS_PROXY=http://egress-proxy:3128 \

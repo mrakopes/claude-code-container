@@ -1,19 +1,2 @@
 #!/bin/bash
-
-podman run --rm -it \
-    --userns=keep-id --cap-drop=ALL --security-opt no-new-privileges \
-    --cgroup-parent=agents.slice \
-    --memory="${CCD_MEM:-8g}" --memory-swap="${CCD_MEM:-8g}" \
-    --cpus="${CCD_CPUS:-4}" --cpu-shares=512 \
-    --pids-limit=2048 \
-    --tmpfs /tmp:rw,size=2g,mode=1777 \
-    --ulimit nofile=8192:8192 \
-    -v "$PWD":"$PWD" -w "$PWD" \
-    -v ~/.local/share/claude-agent-wedos:/home/agent/.claude \
-    -e CLAUDE_CONFIG_DIR=/home/agent/.claude \
-    --name "claude-$(basename "$PWD")" \
-    localhost/claude-agent:latest claude "$@"
-
-
-# @TODO - restricted network/egress
-#    --network agent-net -e HTTPS_PROXY=http://egress-proxy:3128 \
+CCD_PROFILE=claude-agent-wedos exec "$(dirname "$(readlink -f "$0")")/ccd" "$@"

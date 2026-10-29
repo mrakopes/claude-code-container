@@ -1,6 +1,6 @@
 
 
-## deleagte cpu cpuset io memory pids cgroup controllers to user services:
+## delegate cpu cpuset io memory pids cgroup controllers to user services:
 `/etc/systemd/system/user@.service.d/delegate.conf`:
 
 ```
@@ -18,7 +18,7 @@ Delegate=cpu cpuset io memory pids
 cpuset cpu io memory pids
 ```
 
-## dedicated systemd slice `agenst.slice`
+## dedicated systemd slice `agents.slice`
 here we define combined resource limits for all agents containers
 
 ```
@@ -30,29 +30,23 @@ CPUQuota=600%
 CPUWeight=50
 ```
 
-## shell wrapper
+## wrapper scripts
+
+`bin/ccd` runs claude code in the container for the current directory; `bin/ccdw` is the same with the `claude-agent-wedos` profile.
+Symlink them into `~/bin` (or anywhere on `$PATH`):
 
 ```
-ccd() {
-  podman run --rm -it \
-    --userns=keep-id --cap-drop=ALL --security-opt no-new-privileges \
-    --cgroup-parent=agents.slice \
-    --memory="${CCD_MEM:-8g}" --memory-swap="${CCD_MEM:-8g}" \
-    --cpus="${CCD_CPUS:-4}" --cpu-shares=512 \
-    --pids-limit=2048 \
-    --tmpfs /tmp:rw,size=2g,mode=1777 \
-    --ulimit nofile=8192:8192 \
-    -v "$PWD":"$PWD" -w "$PWD" \
-    -v ~/.local/share/claude-agent:/home/agent/.claude \
-    -e CLAUDE_CONFIG_DIR=/home/agent/.claude \
-    --name "claude-$(basename "$PWD")" \
-    localhost/claude-agent:latest claude "$@"
-}
+ln -s "$PWD"/bin/ccd ~/bin/ccd
+ln -s "$PWD"/bin/ccdw ~/bin/ccdw
 ```
+
+Env vars:
+
+- `CCD_PROFILE` - config profile, stored in `~/.local/share/$CCD_PROFILE` (default `claude-agent`)
+- `CCD_MEM` - memory limit (default `8g`)
+- `CCD_CPUS` - cpu limit (default `4`)
+
+Arguments are passed to `claude`, e.g. `ccd --resume` or `ccd -p "..." | less` (a TTY is only allocated when attached to a terminal).
 
 @TODO - restricted network/egress
 #    --network agent-net -e HTTPS_PROXY=http://egress-proxy:3128 \
-
-
-
-
