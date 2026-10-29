@@ -1,0 +1,27 @@
+#!/bin/bash
+# check for a new claude code release (one tiny request, no container run);
+# with -u bump CLAUDE_VERSION in the Dockerfile and rebuild the image
+set -euo pipefail
+
+dockerfile="$(dirname "$(readlink -f "$0")")/../dockerfiles/claude-code/Dockerfile"
+image=localhost/claude-agent:latest
+
+latest=$(curl -fsS --max-time 10 https://downloads.claude.ai/claude-code-releases/latest)
+[[ $latest =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "unexpected version: $latest" >&2; exit 2; }
+pinned=$(sed -n 's/^ARG CLAUDE_VERSION=//p' "$dockerfile")
+built=$(podman image inspect -f '{{index .Config.Labels "claude-code.version"}}' "$image" 2>/dev/null || true)
+
+echo "latest: $latest  pinned: $pinned  image: ${built:-none}"
+
+if [ "$latest" = "$pinned" ] && [ "$pinned" = "$built" ]; then
+    echo "up to date"
+    exit 0
+fi
+
+if [ "${1:-}" != "-u" ]; then
+    echo "update available, run: $(basename "$0") -u"
+    exit 1
+fi
+
+sed -i "s/^ARG CLAUDE_VERSION=.*/ARG CLAUDE_VERSION=$latest/" "$dockerfile"
+podman build -t "$image" "$(dirname "$dockerfile")"

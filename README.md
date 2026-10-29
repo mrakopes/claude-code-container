@@ -48,5 +48,12 @@ Env vars:
 
 Arguments are passed to `claude`, e.g. `ccd --resume` or `ccd -p "..." | less` (a TTY is only allocated when attached to a terminal).
 
+## claude code updates
+
+The claude code version is pinned in `dockerfiles/claude-code/Dockerfile` (`ARG CLAUDE_VERSION`). It sits at the top, so a bump rebuilds every layer, including an `apt-get upgrade`.
+
+`ccd-update` checks for a new release (one small request to the release endpoint, compared with the pinned version and the built image's `claude-code.version` label). Exits 0 if up to date, 1 if an update is available.
+`ccd-update -u` bumps the pinned version and rebuilds `localhost/claude-agent:latest`.
+
 @TODO - restricted network/egress
 #    --network agent-net -e HTTPS_PROXY=http://egress-proxy:3128 \

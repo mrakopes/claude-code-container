@@ -1,13 +1,21 @@
 FROM debian:trixie-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl git jq less openssh-client \
+# bumping the version invalidates all layers below -> fresh apt upgrade too
+# (bin/ccd-update checks for a new release, bumps it and rebuilds)
+ARG CLAUDE_VERSION=2.1.312
+
+RUN echo "claude-code ${CLAUDE_VERSION}" \
+    && apt-get update && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
-ARG CLAUDE_VERSION=latest
 RUN curl -fsSL https://claude.ai/install.sh | bash -s ${CLAUDE_VERSION} \
     && cp -L /root/.local/bin/claude /usr/local/bin/claude \
     && rm -rf /root/.local
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git jq less openssh-client vim \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://packages.buildkite.com/helm-linux/helm-debian/gpgkey \
       -o /usr/share/keyrings/helm.asc \
@@ -27,4 +35,7 @@ RUN useradd -m -s /bin/bash agent
 USER agent
 ENV HOME=/home/agent \
     CLAUDE_CONFIG_DIR=/home/agent/.claude \
-    DISABLE_AUTOUPDATER=1
+    DISABLE_AUTOUPDATER=1 \
+    EDITOR=vim
+
+LABEL claude-code.version=${CLAUDE_VERSION}
