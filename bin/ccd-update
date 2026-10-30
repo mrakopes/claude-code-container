@@ -1,6 +1,6 @@
 #!/bin/bash
 # check for a new claude code release (one tiny request, no container run);
-# with -u bump CLAUDE_VERSION in the Dockerfile and rebuild the image
+# with -u bump CLAUDE_VERSION in the Dockerfile and rebuild the agent and proxy images
 set -euo pipefail
 
 dockerfile="$(dirname "$(readlink -f "$0")")/../dockerfiles/claude-code/Dockerfile"
@@ -25,3 +25,7 @@ fi
 
 sed -i "s/^ARG CLAUDE_VERSION=.*/ARG CLAUDE_VERSION=$latest/" "$dockerfile"
 podman build -t "$image" "$(dirname "$dockerfile")"
+
+# fresh squid too; not restarted here, that would cut running agents' connections
+podman build --pull --no-cache -t localhost/ccd-proxy:latest "$(dirname "$dockerfile")/../egress-proxy"
+echo "proxy image rebuilt, apply with: ccd-proxy restart (for each profile)"

@@ -1,0 +1,38 @@
+# domains all ccd profiles can reach, one per line (squid dstdomain syntax):
+#   example.com   only this host
+#   .example.com  this host and all subdomains
+# don't list a host that a .domain entry already covers
+# apply changes with: ccd-proxy reload
+
+# claude code
+api.anthropic.com
+mcp-proxy.anthropic.com
+claude.ai
+claude.com
+platform.claude.com
+sso.claude.com
+code.claude.com
+downloads.claude.ai
+.frame.claudeusercontent.com
+
+# python, npm
+pypi.org
+files.pythonhosted.org
+registry.npmjs.org
+
+# github
+github.com
+api.github.com
+codeload.github.com
+raw.githubusercontent.com
+objects.githubusercontent.com
+release-assets.githubusercontent.com
+
+# debian
+deb.debian.org
+security.debian.org
+
+# terraform, helm
+registry.terraform.io
+releases.hashicorp.com
+get.helm.sh

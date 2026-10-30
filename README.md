@@ -39,6 +39,7 @@ Symlink them into `~/bin` (or anywhere on `$PATH`):
 ln -s "$PWD"/bin/ccd ~/bin/ccd
 ln -s "$PWD"/bin/ccdw ~/bin/ccdw
 ln -s "$PWD"/bin/ccd-update ~/bin/ccd-update
+ln -s "$PWD"/bin/ccd-proxy ~/bin/ccd-proxy
 ```
 
 Env vars:
@@ -46,6 +47,7 @@ Env vars:
 - `CCD_PROFILE` - config profile, stored in `~/.local/share/$CCD_PROFILE` (default `claude-agent`)
 - `CCD_MEM` - memory limit (default `8g`)
 - `CCD_CPUS` - cpu limit (default `4`)
+- `CCD_NET` - `open` skips the egress proxy for this run (default: restricted, see [network access](#network-access))
 
 Arguments are passed to `claude`, e.g. `ccd --resume` or `ccd -p "..." | less` (a TTY is only allocated when attached to a terminal).
 
@@ -105,12 +107,50 @@ Needs a powerline/nerd font in the host terminal, none in the image.
 The claude code version is pinned in `dockerfiles/claude-code/Dockerfile` (`ARG CLAUDE_VERSION`). It sits at the top, so a bump rebuilds every layer, including an `apt-get upgrade`.
 
 `ccd-update` checks for a new release (one small request to the release endpoint, compared with the pinned version and the built image's `claude-code.version` label). Exits 0 if up to date, 1 if an update is available.
-`ccd-update -u` bumps the pinned version and rebuilds `localhost/claude-agent:latest`.
+`ccd-update -u` bumps the pinned version and rebuilds `localhost/claude-agent:latest` and `localhost/ccd-proxy:latest`. Running proxies keep the old image until `ccd-proxy restart`.
 
----
+## network access
 
-@TODO - restricted network/egress
+Agents only reach allowlisted domains, through a squid proxy:
+
 ```
-# podman ..
-#    --network agent-net -e HTTPS_PROXY=http://egress-proxy:3128 \
+agent -- ccd-net-<profile> (internal) -- ccd-proxy-<profile> -- ccd-egress-<profile> -- internet
 ```
+
+`ccd-net-<profile>` is a podman `--internal` network: no route out and no external DNS. The proxy env vars are only a convenience, an agent that unsets them gets no connectivity. Plain `git+ssh` doesn't work either (push from the host).
+
+Build the proxy image once, `ccd` starts the proxy on first use and leaves it running. If the proxy can't start, `ccd` stops instead of running with an open network.
+
+```
+podman build -t localhost/ccd-proxy:latest dockerfiles/egress-proxy
+ccd-proxy check
+```
+
+Allowlists are on the host, read-only for the agent:
+
+- `~/.config/ccd/common.allowlist` - all profiles, created from `examples/allowlist/common.allowlist` on first start: Claude Code, PyPI, npm, GitHub, Debian, Terraform, Helm
+- `~/.config/ccd/<profile>.allowlist` - additions for one profile, created empty
+
+```
+example.com    # only this host
+.example.com   # this host and all subdomains
+```
+
+Don't list a host that a `.domain` entry already covers. Only ports 80 and 443 are allowed, and names that resolve to private or loopback addresses are blocked.
+
+`ccd-proxy` works on the proxy of `CCD_PROFILE`:
+
+- `ccd-proxy reload` - apply allowlist changes without restarting agents; an invalid list is reported and the proxy keeps running
+- `ccd-proxy log` - follow the access log, blocked requests show as `TCP_DENIED`
+- `ccd-proxy restart` - recreate the proxy from the current image, cuts running agents' connections
+- `ccd-proxy check` - test the restrictions from a throwaway agent container
+
+`CCD_NET=open ccd` runs a single agent on podman's default network, without the proxy.
+
+Limitations:
+
+- filtering is by domain only, without TLS interception, so an allowed domain is allowed entirely. Data can still leave through allowed hosts: `api.anthropic.com` with someone else's API key, GitHub or npm if a token is readable in the project
+- the proxy doesn't compare TLS SNI with the requested host, so domain fronting through a CDN that serves an allowed domain is possible in principle
+- agents of the same profile share a network and can reach each other; different profiles can't
+- WebFetch fails for domains not on the list; WebSearch runs on Anthropic's side and keeps working
+- not listed on purpose: `storage.googleapis.com` (anyone's bucket, only used for `/plugin` metadata) and the optional Datadog telemetry hosts

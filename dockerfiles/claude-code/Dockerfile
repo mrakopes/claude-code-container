@@ -2,7 +2,7 @@ FROM debian:trixie-slim
 
 # bumping the version invalidates all layers below -> fresh apt upgrade too
 # (bin/ccd-update checks for a new release, bumps it and rebuilds)
-ARG CLAUDE_VERSION=2.1.312
+ARG CLAUDE_VERSION=2.1.314
 
 RUN echo "claude-code ${CLAUDE_VERSION}" \
     && apt-get update && apt-get upgrade -y \

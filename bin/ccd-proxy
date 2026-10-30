@@ -1,0 +1,115 @@
+#!/bin/bash
+# per-profile egress proxy for ccd agents, see README.md
+#   start    start the proxy if it isn't running (ccd does this)
+#   reload   apply allowlist changes, keeps the proxy up if a list is invalid
+#   log      follow the access log, blocked requests show as TCP_DENIED
+#   restart  recreate the proxy from the current image, cuts agents' connections
+#   check    test the restrictions from a throwaway agent container
+set -euo pipefail
+
+profile="${CCD_PROFILE:-claude-agent}"
+root="$(dirname "$(readlink -f "$0")")/.."
+cfgdir="$HOME/.config/ccd"
+image=localhost/ccd-proxy:latest
+name="ccd-proxy-$profile"
+net="ccd-net-$profile"
+egress="ccd-egress-$profile"
+
+die() { echo "ccd-proxy: $*" >&2; exit 1; }
+
+running() {
+    [ "$(podman container inspect -f '{{.State.Running}}' "$name" 2>/dev/null)" = true ]
+}
+
+ensure_net() {
+    # the second exists is for another ccd creating it at the same time
+    podman network exists "$1" \
+        || podman network create "${@:2}" "$1" >/dev/null 2>&1 \
+        || podman network exists "$1"
+}
+
+start() {
+    local err=""
+    if ! running; then
+        podman image exists "$image" \
+            || die "no $image, build it: podman build -t $image $(readlink -f "$root/dockerfiles/egress-proxy")"
+        mkdir -p "$cfgdir"
+        [ -f "$cfgdir/common.allowlist" ] || cp "$root/examples/allowlist/common.allowlist" "$cfgdir/"
+        touch "$cfgdir/$profile.allowlist"
+        # egress is a separate network: the default one has no dns
+        ensure_net "$egress" || die "can't create network $egress"
+        ensure_net "$net" --internal || die "can't create network $net"
+        err=$(podman start "$name" 2>&1 || podman run -d --name "$name" --hostname "$name" \
+            --network "$egress" --network "$net" \
+            --user "$(id -u):$(id -g)" --userns=keep-id \
+            --cap-drop=ALL --security-opt no-new-privileges \
+            --read-only --tmpfs /tmp:rw,size=64m,mode=1777 \
+            --cgroup-parent=agents.slice \
+            --memory=256m --memory-swap=256m --pids-limit=256 \
+            --ulimit nofile=8192:8192 \
+            -v "$cfgdir":/etc/ccd:ro \
+            -e CCD_PROFILE="$profile" \
+            "$image" 2>&1) || true
+    fi
+    for _ in {1..25}; do
+        podman exec "$name" bash -c '</dev/tcp/127.0.0.1/3128' 2>/dev/null && return 0
+        sleep 0.1
+    done
+    [ -z "$err" ] || echo "$err" >&2
+    die "proxy $name isn't up, see: podman logs $name"
+}
+
+check() {
+    start
+    local proxy="http://$name:3128" e=()
+    for v in HTTP_PROXY HTTPS_PROXY http_proxy https_proxy; do e+=(-e "$v=$proxy"); done
+    podman run --rm -i --network "$net" \
+        --userns=keep-id --cap-drop=ALL --security-opt no-new-privileges \
+        "${e[@]}" -e NO_PROXY=localhost,127.0.0.1,::1 -e no_proxy=localhost,127.0.0.1,::1 \
+        localhost/claude-agent:latest bash -s -- "$proxy" <<'EOF'
+proxy=$1
+fails=0
+ok() { # <description> <command...>: passes if the command succeeds
+    local d=$1; shift
+    if "$@" >/dev/null 2>&1; then echo "ok    $d"; else echo "FAIL  $d"; fails=$((fails + 1)); fi
+}
+no() { # <description> <command...>: passes if the command fails
+    local d=$1; shift
+    if "$@" >/dev/null 2>&1; then echo "FAIL  $d"; fails=$((fails + 1)); else echo "ok    $d"; fi
+}
+tunnel() { [ "$(curl -s -o /dev/null --max-time 15 -w '%{http_connect}' -x "$proxy" "$2")" = "$1" ]; }
+plain() { [ "$(curl -s -o /dev/null --max-time 15 -w '%{http_code}' -x "$proxy" "$2")" = "$1" ]; }
+
+ok "allowed: api.anthropic.com"          tunnel 200 https://api.anthropic.com/
+ok "allowed: pypi.org"                   curl -fs --max-time 15 https://pypi.org/simple/idna/
+ok "allowed: pip download"               python3 -m pip download -q --no-cache-dir --no-deps -d /tmp/pip idna
+ok "allowed: git over https"             git ls-remote https://github.com/git/git HEAD
+ok "denied: example.com"                 tunnel 403 https://example.com/
+ok "denied: http://example.com"          plain 403 http://example.com/
+ok "denied: bare ip"                     tunnel 403 https://1.1.1.1/
+ok "denied: host via pasta"              plain 403 http://169.254.1.2/
+ok "denied: host.containers.internal"    plain 403 http://host.containers.internal/
+ok "denied: allowed host, other port"    tunnel 403 https://github.com:22/
+ok "denied: proxy's own manager"         plain 403 "$proxy/squid-internal-mgr/info"
+no "no route without proxy"              curl -s --noproxy '*' --max-time 5 https://1.1.1.1/
+no "no external dns"                     getent hosts example.com
+
+[ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }
+EOF
+}
+
+case "${1:-}" in
+    start) start ;;
+    reload)
+        running || die "$name isn't running"
+        podman exec "$name" squid -k parse
+        podman exec "$name" squid -k reconfigure
+        ;;
+    log) exec podman logs -f "$name" ;;
+    restart)
+        podman rm -f -t 2 "$name" >/dev/null 2>&1 || true
+        start
+        ;;
+    check) check ;;
+    *) die "usage: ccd-proxy start|reload|log|restart|check" ;;
+esac

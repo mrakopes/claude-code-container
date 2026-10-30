@@ -53,6 +53,21 @@ if [ -n "$repo" ]; then
     fi
 fi
 
+# egress: internal network without a route out, only the proxy reaches the internet
+net=()
+case "${CCD_NET:-}" in
+    open) ;;
+    "")
+        CCD_PROFILE="$profile" "$(dirname "$(readlink -f "$0")")/ccd-proxy" start
+        net=(--network "ccd-net-$profile")
+        for v in HTTP_PROXY HTTPS_PROXY http_proxy https_proxy; do
+            net+=(-e "$v=http://ccd-proxy-$profile:3128")
+        done
+        net+=(-e NO_PROXY=localhost,127.0.0.1,::1 -e no_proxy=localhost,127.0.0.1,::1)
+        ;;
+    *) echo "ccd: unknown CCD_NET=$CCD_NET (only 'open' or unset)" >&2; exit 1 ;;
+esac
+
 tty=(-i); [ -t 0 ] && [ -t 1 ] && tty=(-it)
 name="$profile-$(basename "$PWD" | tr -c 'a-zA-Z0-9_.\n-' '_')"
 name="${name:0:55}-$$" # also the hostname: max 63 chars
@@ -70,8 +85,6 @@ exec podman run --rm "${tty[@]}" \
     -e CLAUDE_CONFIG_DIR=/home/agent/.claude \
     -e CCD_PROFILE="$profile" \
     "${gitcfg[@]}" \
+    "${net[@]}" \
     --name "$name" --hostname "$name" \
     localhost/claude-agent:latest claude "${claude_args[@]}" "$@"
-
-# @TODO - restricted network/egress
-#    --network agent-net -e HTTPS_PROXY=http://egress-proxy:3128 \

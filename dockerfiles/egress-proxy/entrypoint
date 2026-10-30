@@ -1,0 +1,20 @@
+#!/bin/bash
+set -euo pipefail
+
+# the directory is mounted, not the files: a bind-mounted file goes stale when
+# an editor saves by rename
+mkdir -p /tmp/allow
+ln -sf /etc/ccd/common.allowlist /tmp/allow/common
+ln -sf "/etc/ccd/$CCD_PROFILE.allowlist" /tmp/allow/profile
+
+# resolv.conf also lists the internal network's resolver, which answers NXDOMAIN
+# for external names -> use only the gateway of the default route (egress network)
+gw=""
+while read -r _ dest hex _; do
+    [ "$dest" = 00000000 ] && { gw=$hex; break; }
+done </proc/net/route
+[ -n "$gw" ] || { echo "entrypoint: no default route" >&2; exit 1; }
+printf 'dns_nameservers %d.%d.%d.%d\n' \
+    "0x${gw:6:2}" "0x${gw:4:2}" "0x${gw:2:2}" "0x${gw:0:2}" >/tmp/squid-dns.conf
+
+exec squid -N
