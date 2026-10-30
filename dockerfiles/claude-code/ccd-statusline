@@ -1,0 +1,142 @@
+#!/bin/bash
+# claude code status line: powerline segments, dropped from the right if the terminal is too narrow
+# host | path | git | model | context % | 5h limit %
+export LC_ALL=C.UTF-8
+
+SEP=$'\xee\x82\xb0'    # U+E0B0 powerline separator
+BRANCH=$'\xee\x82\xa0' # U+E0A0 powerline branch
+GIT_CACHE_AGE=4        # seconds, status line updates come in bursts
+
+IFS=$'\x1f' read -r session cwd model ctx limit5h < <(jq -r '[
+    .session_id // "",
+    .workspace.current_dir // .cwd // "",
+    .model.display_name // "",
+    (.context_window.used_percentage // "" | if type == "number" then round else . end),
+    (.rate_limits.five_hour.used_percentage // "" | if type == "number" then round else . end)
+] | map(tostring) | join("\u001f")' 2>/dev/null)
+cwd=${cwd:-$PWD}
+
+bgs=() fgs=() texts=()
+segment() { # bg fg text
+    bgs+=("$1") fgs+=("$2")
+    # the output goes to the host terminal: no escape sequences from dir or branch names
+    texts+=("${3//[[:cntrl:]]/}")
+}
+
+# /home/agent/foo/bar -> ~/f/bar
+short_path() {
+    local p=$1 out="" part
+    case "$p" in "$HOME"|"$HOME"/*) p="~${p#"$HOME"}" ;; esac
+    while [[ "$p" == */* ]]; do
+        part=${p%%/*}
+        out+="${part:0:1}/"
+        p=${p#*/}
+    done
+    printf '%s' "$out$p"
+}
+
+# sets path_text, git_text, git_dirty
+git_read() {
+    local toplevel gitdir common sub wt="" k xy rest
+    path_text=$(short_path "$cwd") git_text="" git_dirty=0
+    { read -r toplevel; read -r gitdir; read -r common; } < <(
+        git -C "$cwd" rev-parse --path-format=absolute \
+            --show-toplevel --absolute-git-dir --git-common-dir 2>/dev/null)
+    [ -n "$toplevel" ] || return 0
+
+    sub=""
+    case "$cwd/" in "$toplevel"/*) sub=${cwd#"$toplevel"} ;; esac
+    [ "$gitdir" = "$common" ] || wt=" ⎇ ${toplevel##*/}"
+    path_text="$(basename "$(dirname "$common")")$wt$sub"
+    [ "${common##*/}" = .git ] || path_text="${toplevel##*/}$sub"
+
+    local head="" oid="" ahead=0 behind=0 staged=0 modified=0 untracked=0 conflicts=0
+    while read -r k xy rest; do
+        case "$k" in
+            '#') case "$xy" in
+                    branch.head) head=$rest ;;
+                    branch.oid) oid=${rest:0:7} ;;
+                    branch.ab) read -r ahead behind <<<"${rest//[+-]/}" ;;
+                 esac ;;
+            1|2) [ "${xy:0:1}" = . ] || staged=$((staged + 1))
+                 [ "${xy:1:1}" = . ] || modified=$((modified + 1)) ;;
+            u) conflicts=$((conflicts + 1)) ;;
+            '?') untracked=$((untracked + 1)) ;;
+        esac
+    done < <(git --no-optional-locks -C "$cwd" status --porcelain=v2 --branch 2>/dev/null)
+
+    [ "$head" != "(detached)" ] || head="@$oid"
+    git_text="$BRANCH $head"
+    [ "$ahead" = 0 ] || git_text+=" ⇡$ahead"
+    [ "$behind" = 0 ] || git_text+=" ⇣$behind"
+    [ "$conflicts" = 0 ] || git_text+=" ✖$conflicts"
+    [ "$staged" = 0 ] || git_text+=" ✚$staged"
+    [ "$modified" = 0 ] || git_text+=" ●$modified"
+    [ "$untracked" = 0 ] || git_text+=" ?$untracked"
+    [ $((staged + modified + untracked + conflicts)) = 0 ] || git_dirty=1
+}
+
+# sets path_text, git_text, git_dirty; cached per session
+git_info() {
+    local cache cached_cwd now tmp
+    cache="${TMPDIR:-/tmp}/ccd-statusline-${session//[^a-zA-Z0-9-]/_}"
+    printf -v now '%(%s)T' -1
+    if [ -f "$cache" ] && [ $((now - $(stat -c %Y "$cache"))) -lt "$GIT_CACHE_AGE" ]; then
+        { read -r cached_cwd; read -r path_text; read -r git_text; read -r git_dirty; } <"$cache"
+        [ "$cached_cwd" = "${cwd//[[:cntrl:]]/}" ] && return 0
+    fi
+    git_read
+    path_text=${path_text//[[:cntrl:]]/} git_text=${git_text//[[:cntrl:]]/}
+    # this script gets killed when a newer update arrives -> atomic write
+    tmp=$(mktemp "$cache.XXXXXX") || return 0
+    printf '%s\n' "${cwd//[[:cntrl:]]/}" "$path_text" "$git_text" "$git_dirty" >"$tmp"
+    mv -f "$tmp" "$cache"
+}
+
+# percentage segment: dark -> yellow from 50% -> red from 80%
+percent() { # label value dark_bg
+    [ -n "$2" ] || return 0
+    if [ "$2" -ge 80 ]; then segment 160 231 "$1 $2%"
+    elif [ "$2" -ge 50 ]; then segment 178 16 "$1 $2%"
+    else segment "$3" 252 "$1 $2%"
+    fi
+}
+
+# host: profile + pid (the full name repeats the directory), profile picks the colour
+host=${HOSTNAME:-container}
+if [ -n "${CCD_PROFILE:-}" ]; then
+    host="$CCD_PROFILE-${HOSTNAME##*-}"
+    palette=(25 30 54 94 89 130)
+    read -r sum _ < <(printf '%s' "$CCD_PROFILE" | cksum)
+    segment "${palette[sum % ${#palette[@]}]}" 231 "$host"
+else
+    segment 25 231 "$host"
+fi
+
+git_info
+segment 240 231 "$path_text"
+if [ -n "$git_text" ]; then
+    if [ "$git_dirty" = 1 ]; then segment 178 16 "$git_text"; else segment 28 231 "$git_text"; fi
+fi
+[ -z "$model" ] || segment 61 231 "$model"
+percent ctx "$ctx" 238
+percent 5h "$limit5h" 236
+
+# segment width: text + 2 spaces + separator
+n=${#texts[@]}
+if [[ "${COLUMNS:-}" =~ ^[0-9]+$ ]]; then
+    width=0
+    for t in "${texts[@]}"; do width=$((width + ${#t} + 3)); done
+    while [ "$n" -gt 1 ] && [ "$width" -gt $((COLUMNS - 4)) ]; do
+        n=$((n - 1))
+        width=$((width - ${#texts[n]} - 3))
+    done
+fi
+
+out=""
+for ((i = 0; i < n; i++)); do
+    [ "$i" = 0 ] || out+=$'\e[38;5;'"${bgs[i - 1]}"$';48;5;'"${bgs[i]}m$SEP"
+    out+=$'\e[38;5;'"${fgs[i]}"$';48;5;'"${bgs[i]}m ${texts[i]} "
+done
+out+=$'\e[0;38;5;'"${bgs[n - 1]}m$SEP"$'\e[0m'
+printf '%s\n' "$out"

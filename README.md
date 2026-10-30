@@ -84,6 +84,22 @@ Notes:
 - review and merge on the host: `git log main..worktree-<name>`, `git merge worktree-<name>`, `git worktree remove .claude/worktrees/<name>`
 - deleting a branch inside the container prints `warning: update of config-file failed` - harmless, `.git/config` is read-only
 
+## status line
+
+The image ships a powerline-style status line (`dockerfiles/claude-code/ccd-statusline`), enabled for all profiles by `/etc/claude-code/managed-settings.json`:
+
+```
+ claude-agent-1234  claude-code-container/bin   main ⇡1 ✚2 ●1 ?3  Opus 5.5  ctx 34%  5h 12%
+```
+
+- host segment: profile + `ccd` pid, colour derived from the profile name; the full container name (`podman exec`) also has the directory
+- path: repo name + subpath (`repo ⎇ name/subpath` in a linked worktree), shortened path outside a repo
+- git: `⇡` ahead, `⇣` behind, `✖` conflicts, `✚` staged, `●` modified, `?` untracked
+- `ctx` and `5h`: yellow from 50%, red from 80%; `5h` only shows on claude.ai plans, after the first response
+- segments drop from the right if the terminal is too narrow
+
+Needs a powerline/nerd font in the host terminal, none in the image.
+
 ## claude code updates
 
 The claude code version is pinned in `dockerfiles/claude-code/Dockerfile` (`ARG CLAUDE_VERSION`). It sits at the top, so a bump rebuilds every layer, including an `apt-get upgrade`.

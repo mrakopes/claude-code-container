@@ -31,6 +31,9 @@ RUN curl -fsSL https://apt.releases.hashicorp.com/gpg \
     && apt-get update && apt-get install -y --no-install-recommends terraform \
     && rm -rf /var/lib/apt/lists/*
 
+COPY ccd-statusline /usr/local/bin/ccd-statusline
+COPY managed-settings.json /etc/claude-code/managed-settings.json
+
 RUN useradd -m -s /bin/bash agent
 USER agent
 ENV HOME=/home/agent \

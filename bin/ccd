@@ -54,7 +54,8 @@ if [ -n "$repo" ]; then
 fi
 
 tty=(-i); [ -t 0 ] && [ -t 1 ] && tty=(-it)
-name="$profile-$(basename "$PWD" | tr -c 'a-zA-Z0-9_.\n-' '_')-$$"
+name="$profile-$(basename "$PWD" | tr -c 'a-zA-Z0-9_.\n-' '_')"
+name="${name:0:55}-$$" # also the hostname: max 63 chars
 
 exec podman run --rm "${tty[@]}" \
     --userns=keep-id --cap-drop=ALL --security-opt no-new-privileges \
@@ -67,8 +68,9 @@ exec podman run --rm "${tty[@]}" \
     "${mounts[@]}" -w "$PWD" \
     -v "$cfg":/home/agent/.claude \
     -e CLAUDE_CONFIG_DIR=/home/agent/.claude \
+    -e CCD_PROFILE="$profile" \
     "${gitcfg[@]}" \
-    --name "$name" \
+    --name "$name" --hostname "$name" \
     localhost/claude-agent:latest claude "${claude_args[@]}" "$@"
 
 # @TODO - restricted network/egress
