@@ -14,7 +14,7 @@ RUN curl -fsSL https://claude.ai/install.sh | bash -s ${CLAUDE_VERSION} \
     && rm -rf /root/.local
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      git jq less openssh-client vim \
+      git jq less openssh-client python3 python3-pip python3-venv vim \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://packages.buildkite.com/helm-linux/helm-debian/gpgkey \
