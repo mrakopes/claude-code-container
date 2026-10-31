@@ -31,6 +31,13 @@ RUN curl -fsSL https://apt.releases.hashicorp.com/gpg \
     && apt-get update && apt-get install -y --no-install-recommends terraform \
     && rm -rf /var/lib/apt/lists/*
 
+RUN curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+      -o /usr/share/keyrings/nodesource.asc \
+    && echo "deb [signed-by=/usr/share/keyrings/nodesource.asc] https://deb.nodesource.com/node_26.x nodistro main" \
+      > /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY ccd-statusline /usr/local/bin/ccd-statusline
 COPY managed-settings.json /etc/claude-code/managed-settings.json
 
