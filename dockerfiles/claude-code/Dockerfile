@@ -38,6 +38,13 @@ RUN curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
     && apt-get update && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+# playwright with its matching chromium build, shared outside $HOME so the agent user sees it
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN npm install -g playwright \
+    && playwright install --with-deps chromium \
+    && npm cache clean --force \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY ccd-statusline /usr/local/bin/ccd-statusline
 COPY managed-settings.json /etc/claude-code/managed-settings.json
 
