@@ -47,9 +47,20 @@ Env vars:
 - `CCD_PROFILE` - config profile, stored in `~/.local/share/$CCD_PROFILE` (default `claude-agent`)
 - `CCD_MEM` - memory limit (default `8g`)
 - `CCD_CPUS` - cpu limit (default `4`)
+- `CCD_TMP_DAYS` - delete files in the agent's temp dir older than this many days, `0` keeps everything (default `14`, see [temp files](#temp-files))
 - `CCD_NET` - `open` skips the egress proxy for this run (default: restricted, see [network access](#network-access))
 
 Arguments are passed to `claude`, e.g. `ccd --resume` or `ccd -p "..." | less` (a TTY is only allocated when attached to a terminal).
+
+## temp files
+
+`/tmp` is a 2 GB tmpfs, gone when the container exits. Only Claude Code's own temp dir, `/tmp/claude-<uid>` (scratchpads, background task output), is mounted from the host at `~/.cache/ccd/<profile>/tmp`, so files the agent leaves there can be opened from the host and survive restarts and `--resume`:
+
+```
+~/.cache/ccd/<profile>/tmp/<encoded-project-path>/<session-id>/scratchpad/
+```
+
+On each start `ccd` deletes files older than `CCD_TMP_DAYS` (default 14) by mtime, from any session, then removes empty directories. That temp dir isn't limited by the tmpfs size: put `~/.cache/ccd` on its own volume if you want a cap.
 
 ## git config
 

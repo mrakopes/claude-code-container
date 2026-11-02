@@ -5,6 +5,15 @@ profile="${CCD_PROFILE:-claude-agent}"
 cfg="$HOME/.local/share/$profile"
 mkdir -p "$cfg"
 
+# claude's temp dir (scratchpads, task output) on the host, survives restarts
+tmpdir="${XDG_CACHE_HOME:-$HOME/.cache}/ccd/$profile/tmp"
+mkdir -p "$tmpdir"
+days="${CCD_TMP_DAYS:-14}"
+if [ "$days" -gt 0 ]; then
+    find "$tmpdir" -mindepth 1 -type f -mtime +"$days" -delete 2>/dev/null || true
+    find "$tmpdir" -mindepth 1 -type d -empty -delete 2>/dev/null || true
+fi
+
 # per-profile git config, mounted read-only (see examples/gitconfig)
 gitcfg_dir="$HOME/.config/ccd"
 gitcfg=()
@@ -79,6 +88,7 @@ exec podman run --rm "${tty[@]}" \
     --cpus="${CCD_CPUS:-4}" --cpu-shares=512 \
     --pids-limit=2048 \
     --tmpfs /tmp:rw,size=2g,mode=1777 \
+    -v "$tmpdir":/tmp/claude-"$(id -u)" \
     --ulimit nofile=8192:8192 \
     "${mounts[@]}" -w "$PWD" \
     -v "$cfg":/home/agent/.claude \
