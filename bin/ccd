@@ -13,6 +13,14 @@ if [ "$days" -gt 0 ]; then
     find "$tmpdir" -mindepth 1 -type f -mtime +"$days" -delete 2>/dev/null || true
     find "$tmpdir" -mindepth 1 -type d -empty -delete 2>/dev/null || true
 fi
+# same path on the host as in the container: /tmp/ccd-<user>-<profile> -> $tmpdir
+tmplink="/tmp/ccd-$(id -un)-$profile"
+if [ -L "$tmplink" ] && [ "$(readlink "$tmplink")" = "$tmpdir" ]; then :
+elif [ -e "$tmplink" ] || [ -L "$tmplink" ]; then
+    echo "ccd: $tmplink exists and doesn't link to $tmpdir, not touching it" >&2
+else
+    ln -s "$tmpdir" "$tmplink"
+fi
 
 # per-profile git config, mounted read-only (see examples/gitconfig)
 gitcfg_dir="$HOME/.config/ccd"
@@ -88,7 +96,7 @@ exec podman run --rm "${tty[@]}" \
     --cpus="${CCD_CPUS:-4}" --cpu-shares=512 \
     --pids-limit=2048 \
     --tmpfs /tmp:rw,size=2g,mode=1777 \
-    -v "$tmpdir":/tmp/claude-"$(id -u)" \
+    -v "$tmpdir":"$tmplink" -e CLAUDE_CODE_TMPDIR="$tmplink" \
     --ulimit nofile=8192:8192 \
     "${mounts[@]}" -w "$PWD" \
     -v "$cfg":/home/agent/.claude \

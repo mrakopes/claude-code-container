@@ -54,11 +54,13 @@ Arguments are passed to `claude`, e.g. `ccd --resume` or `ccd -p "..." | less` (
 
 ## temp files
 
-`/tmp` is a 2 GB tmpfs, gone when the container exits. Only Claude Code's own temp dir, `/tmp/claude-<uid>` (scratchpads, background task output), is mounted from the host at `~/.cache/ccd/<profile>/tmp`, so files the agent leaves there can be opened from the host and survive restarts and `--resume`:
+`/tmp` is a 2 GB tmpfs, gone when the container exits. Claude Code's own temp dir (scratchpads, background task output) is moved by `CLAUDE_CODE_TMPDIR=/tmp/ccd-<user>-<profile>` onto a host mount, `~/.cache/ccd/<profile>/tmp`, so files the agent leaves there survive restarts and `--resume`. `ccd` also creates the host symlink `/tmp/ccd-<user>-<profile> -> ~/.cache/ccd/<profile>/tmp`, so paths the agent prints work as-is on the host:
 
 ```
-~/.cache/ccd/<profile>/tmp/<encoded-project-path>/<session-id>/scratchpad/
+/tmp/ccd-<user>-<profile>/claude-<uid>/<encoded-project-path>/<session-id>/scratchpad/
 ```
+
+If `/tmp/ccd-<user>-<profile>` already exists on the host and isn't that symlink, `ccd` warns and leaves it alone.
 
 On each start `ccd` deletes files older than `CCD_TMP_DAYS` (default 14) by mtime, from any session, then removes empty directories. That temp dir isn't limited by the tmpfs size: put `~/.cache/ccd` on its own volume if you want a cap.
 
