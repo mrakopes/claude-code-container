@@ -2,6 +2,8 @@
 set -euo pipefail
 
 profile="${CCD_PROFILE:-claude-agent}"
+# used in host paths (and the tmp cleanup below), no "/" or ".." allowed
+[[ "$profile" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] || { echo "ccd: invalid CCD_PROFILE=$profile" >&2; exit 1; }
 cfg="$HOME/.local/share/$profile"
 mkdir -p "$cfg"
 
@@ -9,9 +11,11 @@ mkdir -p "$cfg"
 tmpdir="${XDG_CACHE_HOME:-$HOME/.cache}/ccd/$profile/tmp"
 mkdir -p "$tmpdir"
 days="${CCD_TMP_DAYS:-14}"
+[[ "$days" =~ ^[0-9]+$ ]] || { echo "ccd: invalid CCD_TMP_DAYS=$days" >&2; exit 1; }
 if [ "$days" -gt 0 ]; then
-    find "$tmpdir" -mindepth 1 -type f -mtime +"$days" -delete 2>/dev/null || true
-    find "$tmpdir" -mindepth 1 -type d -empty -delete 2>/dev/null || true
+    # -P: never follow symlinks (the agent writes here), -xdev: stay on this filesystem;
+    # old non-empty dirs fail to delete (silenced), they go once their content is gone
+    find -P "$tmpdir" -mindepth 1 -xdev -mtime +"$days" -delete 2>/dev/null || true
 fi
 # same path on the host as in the container: /tmp/ccd-<user>-<profile> -> $tmpdir
 tmplink="/tmp/ccd-$(id -un)-$profile"
@@ -34,6 +38,12 @@ gitcfg=()
 gitdir=$(git -C "$PWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
 repo=""
 [ "$(basename "$gitdir")" = .git ] && repo=$(dirname "$gitdir")
+
+# per-repo (or per-dir) subdir of $tmpdir, so containers of other projects don't share it
+tmpkey_dir="${repo:-$PWD}"
+tmpkey="$(basename "$tmpkey_dir" | tr -c 'a-zA-Z0-9_.\n-' '_')"
+tmpkey="${tmpkey:0:32}-$(printf %s "$tmpkey_dir" | sha256sum | cut -c1-8)"
+mkdir -p "$tmpdir/$tmpkey"
 
 worktree=0
 for a in "$@"; do
@@ -96,7 +106,9 @@ exec podman run --rm "${tty[@]}" \
     --cpus="${CCD_CPUS:-4}" --cpu-shares=512 \
     --pids-limit=2048 \
     --tmpfs /tmp:rw,size=2g,mode=1777 \
-    -v "$tmpdir":"$tmplink" -e CLAUDE_CODE_TMPDIR="$tmplink" \
+    -v "$tmpdir/$tmpkey":"$tmplink/$tmpkey" -e CLAUDE_CODE_TMPDIR="$tmplink/$tmpkey" \
+    --mount type=tmpfs,destination=/run/user/"$(id -u)",tmpfs-mode=0700,tmpfs-size=16m,chown \
+    -e XDG_RUNTIME_DIR=/run/user/"$(id -u)" \
     --ulimit nofile=8192:8192 \
     "${mounts[@]}" -w "$PWD" \
     -v "$cfg":/home/agent/.claude \

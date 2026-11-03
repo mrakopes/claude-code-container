@@ -54,15 +54,17 @@ Arguments are passed to `claude`, e.g. `ccd --resume` or `ccd -p "..." | less` (
 
 ## temp files
 
-`/tmp` is a 2 GB tmpfs, gone when the container exits. Claude Code's own temp dir (scratchpads, background task output) is moved by `CLAUDE_CODE_TMPDIR=/tmp/ccd-<user>-<profile>` onto a host mount, `~/.cache/ccd/<profile>/tmp`, so files the agent leaves there survive restarts and `--resume`. `ccd` also creates the host symlink `/tmp/ccd-<user>-<profile> -> ~/.cache/ccd/<profile>/tmp`, so paths the agent prints work as-is on the host:
+`/tmp` is a 2 GB tmpfs, gone when the container exits. Claude Code's own temp dir (scratchpads, background task output) is moved by `CLAUDE_CODE_TMPDIR=/tmp/ccd-<user>-<profile>/<repo>-<hash>` onto a host mount, `~/.cache/ccd/<profile>/tmp/<repo>-<hash>`, so files the agent leaves there survive restarts and `--resume`. `ccd` also creates the host symlink `/tmp/ccd-<user>-<profile> -> ~/.cache/ccd/<profile>/tmp`, so paths the agent prints work as-is on the host. `<repo>-<hash>` is the git repo (main checkout) `ccd` runs in, or `$PWD` outside a repo; a container only gets its own one mounted:
 
 ```
-/tmp/ccd-<user>-<profile>/claude-<uid>/<encoded-project-path>/<session-id>/scratchpad/
+/tmp/ccd-<user>-<profile>/<repo>-<hash>/claude-<uid>/<encoded-project-path>/<session-id>/scratchpad/
 ```
+
+`XDG_RUNTIME_DIR` is a per-container tmpfs at `/run/user/<uid>`, so Claude Code's messaging sockets (`cc-socks/<pid>.sock`, pid 1 in every container) don't end up in the shared mount.
 
 If `/tmp/ccd-<user>-<profile>` already exists on the host and isn't that symlink, `ccd` warns and leaves it alone.
 
-On each start `ccd` deletes files older than `CCD_TMP_DAYS` (default 14) by mtime, from any session, then removes empty directories. That temp dir isn't limited by the tmpfs size: put `~/.cache/ccd` on its own volume if you want a cap.
+On each start `ccd` deletes everything (files, sockets, directories) older than `CCD_TMP_DAYS` (default 14) by mtime, from any session; a directory goes only once it is empty, so recent directories stay even when empty. That temp dir isn't limited by the tmpfs size: put `~/.cache/ccd` on its own volume if you want a cap.
 
 ## git config
 
