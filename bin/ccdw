@@ -1,2 +1,0 @@
-#!/bin/bash
-CCD_PROFILE=claude-agent-wedos exec "$(dirname "$(readlink -f "$0")")/ccd" "$@"

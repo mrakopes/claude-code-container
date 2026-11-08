@@ -32,12 +32,11 @@ CPUWeight=50
 
 ## wrapper scripts
 
-`bin/ccd` runs claude code in the container for the current directory; `bin/ccdw` is the same with the `claude-agent-wedos` profile.
-Symlink them into `~/bin` (or anywhere on `$PATH`):
+`bin/ccd` runs claude code in the container for the current directory.
+Symlink the scripts into `~/bin` (or anywhere on `$PATH`):
 
 ```
 ln -s "$PWD"/bin/ccd ~/bin/ccd
-ln -s "$PWD"/bin/ccdw ~/bin/ccdw
 ln -s "$PWD"/bin/ccd-update ~/bin/ccd-update
 ln -s "$PWD"/bin/ccd-proxy ~/bin/ccd-proxy
 ```
@@ -51,6 +50,28 @@ Env vars:
 - `CCD_NET` - `open` skips the egress proxy for this run (default: restricted, see [network access](#network-access))
 
 Arguments are passed to `claude`, e.g. `ccd --resume` or `ccd -p "..." | less` (a TTY is only allocated when attached to a terminal).
+
+## profiles
+
+A profile is a separate agent identity with its own claude login and settings (`~/.local/share/<profile>`), git config, allowlist, proxy, network and temp dirs. Use one per account or client to keep them apart. Names may contain letters, digits, `_`, `.` and `-`.
+
+To add a profile, e.g. `claude-agent-work`, put a wrapper on your `$PATH`:
+
+```
+#!/bin/bash
+# ~/bin/ccd-work
+CCD_PROFILE=claude-agent-work exec ccd "$@"
+```
+
+Optionally give it its own git identity (see [git config](#git-config)) and allowlist additions:
+
+```
+cp examples/gitconfig/claude-agent.gitconfig ~/.config/ccd/claude-agent-work.gitconfig
+# edit [user] in it
+# add domains to ~/.config/ccd/claude-agent-work.allowlist (created empty on first start)
+```
+
+On first start the profile gets its own config dir and proxy, and claude asks you to log in. `ccd-proxy` acts on `CCD_PROFILE`, e.g. `CCD_PROFILE=claude-agent-work ccd-proxy log`.
 
 ## temp files
 

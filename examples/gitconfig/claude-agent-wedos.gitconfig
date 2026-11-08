@@ -1,6 +1,0 @@
-# git config for the claude-agent-wedos ccd profile
-[include]
-	path = common.gitconfig
-[user]
-	name = Your Name (claude)
-	email = you@example.com
