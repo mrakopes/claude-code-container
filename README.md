@@ -169,3 +169,7 @@ Limitations:
 - agents of the same profile share a network and can reach each other; different profiles can't
 - WebFetch fails for domains not on the list; WebSearch runs on Anthropic's side and keeps working
 - not listed on purpose: `storage.googleapis.com` (anyone's bucket, only used for `/plugin` metadata) and the optional Datadog telemetry hosts
+
+## License
+
+MIT, see [LICENSE](LICENSE).
