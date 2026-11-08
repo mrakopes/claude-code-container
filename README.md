@@ -1,7 +1,35 @@
+# claude-code-container
 
+Run [Claude Code](https://claude.com/claude-code) in a rootless podman container, so you can give the agent a lot of autonomy without giving it your machine.
 
-## delegate cpu cpuset io memory pids cgroup controllers to user services:
-`/etc/systemd/system/user@.service.d/delegate.conf`:
+`ccd` starts a throwaway container for the current directory and runs `claude` in it. The agent sees:
+
+- the project directory, read-write (`.git/config` and `.git/hooks` read-only, they run code on the host)
+- its own claude config dir per [profile](#profiles), not your `~/.claude`
+- no ssh keys, credentials or the rest of your home dir
+- only allowlisted domains on the network, through a per-profile [egress proxy](#network-access)
+
+The container runs with all capabilities dropped, `no-new-privileges`, and memory, cpu and pid limits inside a shared [`agents.slice`](#2-systemd-slice-agentsslice). The image (Debian trixie) has git, python, node, playwright with chromium, terraform and helm.
+
+Requirements: Linux with systemd, rootless podman, bash and git on the host.
+
+## quick start
+
+```
+cd ~/git/myproject
+ccd                     # interactive session in the container
+ccd --resume            # arguments go to claude
+ccd -w feature-x        # work in a git worktree, your checkout stays read-only
+ccd -p "fix the tests" | less
+```
+
+Review the changes and push from the host; the agent can commit but can't push.
+
+## setup
+
+### 1. delegate cgroup controllers to user services
+
+Needed for the memory and cpu limits of rootless containers.
 
 ```
 # /etc/systemd/system/user@.service.d/delegate.conf
@@ -10,16 +38,16 @@ Delegate=cpu cpuset io memory pids
 ```
 
 ```
-# systemd daemon reload
-❯ systemctl daemon-reload
+❯ sudo systemctl daemon-reload
 
-# verify:
+# verify (after logging in again):
 ❯ cat /sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/cgroup.controllers
 cpuset cpu io memory pids
 ```
 
-## dedicated systemd slice `agents.slice`
-here we define combined resource limits for all agents containers
+### 2. systemd slice `agents.slice`
+
+Combined resource limits for all agent containers and proxies:
 
 ```
 # ~/.config/systemd/user/agents.slice
@@ -30,10 +58,22 @@ CPUQuota=600%
 CPUWeight=50
 ```
 
-## wrapper scripts
+```
+❯ systemctl --user daemon-reload
+```
 
-`bin/ccd` runs claude code in the container for the current directory.
-Symlink the scripts into `~/bin` (or anywhere on `$PATH`):
+### 3. build the images
+
+```
+podman build -t localhost/claude-agent:latest dockerfiles/claude-code
+podman build -t localhost/ccd-proxy:latest dockerfiles/egress-proxy
+```
+
+Later updates are handled by [`ccd-update`](#claude-code-updates).
+
+### 4. install the scripts
+
+Symlink them into `~/bin` (or anywhere on `$PATH`):
 
 ```
 ln -s "$PWD"/bin/ccd ~/bin/ccd
@@ -41,15 +81,19 @@ ln -s "$PWD"/bin/ccd-update ~/bin/ccd-update
 ln -s "$PWD"/bin/ccd-proxy ~/bin/ccd-proxy
 ```
 
+On the first `ccd` run claude asks you to log in; the login is kept in the profile's config dir. Optionally set up a [git identity](#git-config) for the agent's commits.
+
+## ccd
+
+`ccd [claude args]` runs claude code in the container for the current directory. Arguments are passed to `claude`; a TTY is only allocated when attached to a terminal, so `ccd -p "..." | less` works.
+
 Env vars:
 
-- `CCD_PROFILE` - config profile, stored in `~/.local/share/$CCD_PROFILE` (default `claude-agent`)
+- `CCD_PROFILE` - config profile, stored in `~/.local/share/$CCD_PROFILE` (default `claude-agent`, see [profiles](#profiles))
 - `CCD_MEM` - memory limit (default `8g`)
 - `CCD_CPUS` - cpu limit (default `4`)
 - `CCD_TMP_DAYS` - delete a project's temp dir when no `ccd` has started for it in this many days, `0` keeps everything (default `14`, see [temp files](#temp-files))
 - `CCD_NET` - `open` skips the egress proxy for this run (default: restricted, see [network access](#network-access))
-
-Arguments are passed to `claude`, e.g. `ccd --resume` or `ccd -p "..." | less` (a TTY is only allocated when attached to a terminal).
 
 ## profiles
 
@@ -155,12 +199,7 @@ agent -- ccd-net-<profile> (internal) -- ccd-proxy-<profile> -- ccd-egress-<prof
 
 `ccd-net-<profile>` is a podman `--internal` network: no route out and no external DNS. The proxy env vars are only a convenience, an agent that unsets them gets no connectivity. Plain `git+ssh` doesn't work either (push from the host).
 
-Build the proxy image once, `ccd` starts the proxy on first use and leaves it running. If the proxy can't start, `ccd` stops instead of running with an open network.
-
-```
-podman build -t localhost/ccd-proxy:latest dockerfiles/egress-proxy
-ccd-proxy check
-```
+`ccd` starts the proxy on first use and leaves it running. If the proxy can't start, `ccd` stops instead of running with an open network. `ccd-proxy check` tests the restrictions.
 
 Allowlists are on the host, read-only for the agent:
 
