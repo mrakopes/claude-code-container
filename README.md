@@ -4,14 +4,23 @@ Run [Claude Code](https://claude.com/claude-code) in a rootless podman container
 
 `ccd` starts a throwaway container for the current directory and runs `claude` in it. The agent sees:
 
-- the project directory, read-write (`.git/config` and `.git/hooks` read-only, they run code on the host)
+- the current directory, read-write; when that's the repo root, `.git/config` and `.git/hooks` are read-only
 - its own claude config dir per [profile](#profiles), not your `~/.claude`
-- no ssh keys, credentials or the rest of your home dir
+- none of your ssh keys, credentials or the rest of your home dir
 - only allowlisted domains on the network, through a per-profile [egress proxy](#network-access)
 
-The container runs with all capabilities dropped, `no-new-privileges`, and memory, cpu and pid limits inside a shared [`agents.slice`](#2-systemd-slice-agentsslice). The image (Debian trixie) has git, python, node, playwright with chromium, terraform and helm.
+The container runs as your uid (rootless, `--userns=keep-id`) with all capabilities dropped, `no-new-privileges`, and memory, cpu and pid limits inside a shared [`agents.slice`](#2-systemd-slice-agentsslice). The image (Debian trixie) has git, python, node, playwright with chromium, terraform and helm.
 
 Requirements: Linux with systemd, rootless podman, bash and git on the host.
+
+## what it doesn't protect
+
+- **the project is untrusted after a session.** Anything the agent writes can run code on the host when you use it: build files, `package.json` scripts, `.envrc`, the project's `.claude/settings.json`, editor configs. Git is affected too, even with `.git/config` and `.git/hooks` read-only: a nested `.git` in a subdir, `.git/commondir`, submodule gitdirs under `.git/modules` or a worktree's `.git` file can point git at a config the agent wrote (e.g. `core.fsmonitor`). Plain `git status` in such a dir runs it, and so does a shell prompt that shows git status. Review the diff before building or running anything, and check for stray `.git` entries (`find . -name .git`, `ls .git`).
+- **projects of one profile share the config dir.** The agent can read other projects' transcripts and the profile's claude login (`.credentials.json`), and change settings, hooks and MCP servers that apply to the profile's later sessions. Use separate [profiles](#profiles) for projects that must not see each other.
+- **secrets in the project are readable**, `.env` files or a token in `.git/config` remote URLs included, and can leave through allowed domains (see [network limitations](#network-access)).
+- `~/.config/ccd` is mounted read-only as a whole when the profile has a gitconfig, so the agent sees all profiles' gitconfigs and allowlists.
+- the git identity isn't enforced: the agent can't change the config, but can commit with `git -c user.email=...`.
+- disk usage in the project and the [temp dir](#temp-files) isn't limited.
 
 ## quick start
 
@@ -23,7 +32,7 @@ ccd -w feature-x        # work in a git worktree, your checkout stays read-only
 ccd -p "fix the tests" | less
 ```
 
-Review the changes and push from the host; the agent can commit but can't push.
+Review the changes and push from the host. The agent can commit, but has no ssh keys or git credentials to push with (unless the project contains a token).
 
 ## setup
 
@@ -133,7 +142,7 @@ Each start touches `~/.cache/ccd/<profile>/tmp/<repo>-<hash>.stamp` (next to the
 
 ## git config
 
-Each profile can have its own git config in `~/.config/ccd/<profile>.gitconfig`. If the file exists, `ccd` mounts `~/.config/ccd` read-only and points `GIT_CONFIG_GLOBAL` at it, so the agent can't change its identity or config. Shared settings go to `common.gitconfig`, included from the profile files.
+Each profile can have its own git config in `~/.config/ccd/<profile>.gitconfig`. If the file exists, `ccd` mounts `~/.config/ccd` read-only and points `GIT_CONFIG_GLOBAL` at it, so the agent can't change the file. It can still override the identity per command (`git -c`, `GIT_AUTHOR_*`), so this sets a default, not an enforced identity. Shared settings go to `common.gitconfig`, included from the profile files.
 
 ```
 mkdir -p ~/.config/ccd
@@ -156,7 +165,7 @@ Mounts in worktree mode:
 | `<repo>/.git/config`, `<repo>/.git/hooks` | read-only - both run code on the host |
 | `<repo>/.claude/worktrees` | read-write - the agent's worktrees |
 
-The agent also gets `--add-dir <repo>` and a short system prompt note about the read-only checkout. Without `-w`, `.git/config` and `.git/hooks` are still read-only when `ccd` runs in the repo root.
+The agent also gets `--add-dir <repo>` and a short system prompt note about the read-only checkout. Without `-w`, `.git/config` and `.git/hooks` are still read-only when `ccd` runs in the repo root; in a subdir the repo's `.git` isn't mounted at all, so git doesn't work there. Read-only config and hooks don't make `.git` safe, see [what it doesn't protect](#what-it-doesnt-protect).
 
 Notes:
 
@@ -220,7 +229,7 @@ Don't list a host that a `.domain` entry already covers. Only ports 80 and 443 a
 - `ccd-proxy restart` - recreate the proxy from the current image, cuts running agents' connections
 - `ccd-proxy check` - test the restrictions from a throwaway agent container
 
-`CCD_NET=open ccd` runs a single agent on podman's default network, without the proxy.
+`CCD_NET=open ccd` runs a single agent on podman's default network, without the proxy: full internet access, and with pasta the host itself is reachable at `host.containers.internal`.
 
 Limitations:
 
