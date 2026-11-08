@@ -2,7 +2,7 @@
 set -euo pipefail
 
 profile="${CCD_PROFILE:-claude-agent}"
-# used in host paths (and the tmp cleanup below), no "/" or ".." allowed
+# used in host paths (and the tmp cleanup), no "/" or ".." allowed
 [[ "$profile" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] || { echo "ccd: invalid CCD_PROFILE=$profile" >&2; exit 1; }
 cfg="$HOME/.local/share/$profile"
 mkdir -p "$cfg"
@@ -12,11 +12,6 @@ tmpdir="${XDG_CACHE_HOME:-$HOME/.cache}/ccd/$profile/tmp"
 mkdir -p "$tmpdir"
 days="${CCD_TMP_DAYS:-14}"
 [[ "$days" =~ ^[0-9]+$ ]] || { echo "ccd: invalid CCD_TMP_DAYS=$days" >&2; exit 1; }
-if [ "$days" -gt 0 ]; then
-    # -P: never follow symlinks (the agent writes here), -xdev: stay on this filesystem;
-    # old non-empty dirs fail to delete (silenced), they go once their content is gone
-    find -P "$tmpdir" -mindepth 1 -xdev -mtime +"$days" -delete 2>/dev/null || true
-fi
 # same path on the host as in the container: /tmp/ccd-<user>-<profile> -> $tmpdir
 tmplink="/tmp/ccd-$(id -un)-$profile"
 if [ -L "$tmplink" ] && [ "$(readlink "$tmplink")" = "$tmpdir" ]; then :
@@ -44,6 +39,21 @@ tmpkey_dir="${repo:-$PWD}"
 tmpkey="$(basename "$tmpkey_dir" | tr -c 'a-zA-Z0-9_.\n-' '_')"
 tmpkey="${tmpkey:0:32}-$(printf %s "$tmpkey_dir" | sha256sum | cut -c1-8)"
 mkdir -p "$tmpdir/$tmpkey"
+# last start of a container for <key>: <key>.stamp next to its dir, outside the mount
+touch "$tmpdir/$tmpkey.stamp"
+if [ "$days" -gt 0 ]; then
+    for d in "$tmpdir"/*; do
+        s="$d.stamp"
+        case "$d" in *.stamp) [ -e "${d%.stamp}" ] || rm -f "$d"; continue ;; esac
+        [ -d "$d" ] && [ ! -L "$d" ] || continue
+        # no stamp yet (dir from before stamps): start counting now
+        [ -e "$s" ] || { touch "$s"; continue; }
+        # whole tree at once, nothing inside is walked for mtimes; rm doesn't follow symlinks
+        if [ -n "$(find "$s" -maxdepth 0 -mtime +"$days")" ]; then
+            rm -rf --one-file-system "$d" && rm -f "$s" || echo "ccd: couldn't fully remove $d" >&2
+        fi
+    done
+fi
 
 worktree=0
 for a in "$@"; do

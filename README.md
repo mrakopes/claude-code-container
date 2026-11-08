@@ -47,7 +47,7 @@ Env vars:
 - `CCD_PROFILE` - config profile, stored in `~/.local/share/$CCD_PROFILE` (default `claude-agent`)
 - `CCD_MEM` - memory limit (default `8g`)
 - `CCD_CPUS` - cpu limit (default `4`)
-- `CCD_TMP_DAYS` - delete files in the agent's temp dir older than this many days, `0` keeps everything (default `14`, see [temp files](#temp-files))
+- `CCD_TMP_DAYS` - delete a project's temp dir when no `ccd` has started for it in this many days, `0` keeps everything (default `14`, see [temp files](#temp-files))
 - `CCD_NET` - `open` skips the egress proxy for this run (default: restricted, see [network access](#network-access))
 
 Arguments are passed to `claude`, e.g. `ccd --resume` or `ccd -p "..." | less` (a TTY is only allocated when attached to a terminal).
@@ -64,7 +64,7 @@ Arguments are passed to `claude`, e.g. `ccd --resume` or `ccd -p "..." | less` (
 
 If `/tmp/ccd-<user>-<profile>` already exists on the host and isn't that symlink, `ccd` warns and leaves it alone.
 
-On each start `ccd` deletes everything (files, sockets, directories) older than `CCD_TMP_DAYS` (default 14) by mtime, from any session; a directory goes only once it is empty, so recent directories stay even when empty. That temp dir isn't limited by the tmpfs size: put `~/.cache/ccd` on its own volume if you want a cap.
+Each start touches `~/.cache/ccd/<profile>/tmp/<repo>-<hash>.stamp` (next to the mounted dir, so the agent can't touch it) and removes the whole `<repo>-<hash>` tree of every project whose stamp is older than `CCD_TMP_DAYS` (default 14), without walking the trees. A container running longer than that without another `ccd` start in the same project can lose its temp dir under it. Dirs without a stamp (from before stamps existed) get one and are counted from then. That temp dir isn't limited by the tmpfs size: put `~/.cache/ccd` on its own volume if you want a cap.
 
 ## git config
 
